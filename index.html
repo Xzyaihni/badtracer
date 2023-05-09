@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>rays..</title>
+    <script src="main.js" defer></script>
+    <style>
+      html
+      {
+        background: hsl(330, 45%, 70%);
+      }
+
+      .centered
+      {
+        display: flex;
+
+        width: 100%;
+        justify-content: center;
+      }
+
+      #main_grid
+      {
+        display: grid;
+
+        grid-template-columns: 33% 33% 33%;
+      }
+
+      #display_canvas
+      {
+        grid-column: 2;
+      }
+
+      #display_canvas
+      {
+        margin: 5px;
+        border: 5px solid #ffc4d5;
+        transform: scaleY(-1);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="centered" id="main_grid">
+      <canvas id="display_canvas" width="640" height="640">
+        sowy couldnt display canvas, something wrong ; -;
+      </canvas>
+    </div>
+  </body>
+</html>
