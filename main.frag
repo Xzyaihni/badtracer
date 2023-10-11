@@ -45,6 +45,18 @@ const float PI = 3.1415926535897932384626433832795;
 const float MEAN = 0.0;
 const float SD = 1.0;
 
+uint squares_random(uint seed_raw, inout uint w, inout uint current)
+{
+    uint seed = seed_raw | 0x80000001u;
+
+    w += seed;
+
+    current = (current * current) + w;
+    current = (current >> 16) | (current << 16);
+
+    return current;
+}
+
 float uniform_random(inout uint seed)
 {
     seed = seed * 747796405u + 2891336453u;
@@ -181,14 +193,16 @@ vec3 pixel_at(vec2 pixel, uint seed)
 void main()
 {
     vec2 pixel = gl_FragCoord.xy / vec2(CANVAS_DIMENSIONS);
-    uint seed = uint(gl_FragCoord.y) * uint(CANVAS_DIMENSIONS.x) + uint(gl_FragCoord.x) + 1u;
+    uint pixel_index = uint(gl_FragCoord.y) * uint(CANVAS_DIMENSIONS.x) + uint(gl_FragCoord.x);
+    uint seed = (pixel_index + 1u) * (pixel_index + 1u);
 
-    const uint RAYS_PER_PIXEL = 4u;
+    const uint RAYS_PER_PIXEL = 32u;
 
     vec3 color = vec3(0.0);
     for(uint i = 0u; i < RAYS_PER_PIXEL; ++i)
     {
-        color += pixel_at(pixel, (seed + i * 568877u) * 5016083u + frame_seed);
+        uint seed_inner = squares_random(frame_seed, seed, i);
+        color += pixel_at(pixel, seed_inner);
     }
 
     frag_color = vec4(color / float(RAYS_PER_PIXEL), 1.0);

@@ -12,8 +12,10 @@ let spheres_smoothness = [];
 
 let program_info = null;
 
+let rendered_image = null;
+
 let frame_index = 0;
-const max_rays = 1500;
+const max_rays = 1000;
 
 document.addEventListener("DOMContentLoaded", main);
 function main()
@@ -38,17 +40,31 @@ function mix_frame()
     let canvas_image = new Uint8ClampedArray(total_size);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, canvas_image);
 
-    if (frame_index != 0)
-    {
-        const display_image = display_context.getImageData(0, 0, width, height).data;
+    const display_image = display_context.getImageData(0, 0, width, height).data;
 
+    if (rendered_image === null)
+    {
+        rendered_image = new Float64Array(total_size);
+
+        for(let i = 0; i < total_size; ++i)
+        {
+            const this_pixel = display_image[i];
+
+            rendered_image[i] = this_pixel;
+
+            canvas_image[i] = this_pixel;
+        }
+    } else
+    {
         const next_frame = frame_index + 1;
         for(let i = 0; i < total_size; ++i)
         {
             const mixed_pixel =
-                display_image[i] * (frame_index / next_frame) + canvas_image[i] / next_frame;
+                rendered_image[i] * (frame_index / next_frame) + canvas_image[i] / next_frame;
 
-            canvas_image[i] = Math.round(mixed_pixel);
+            rendered_image[i] = mixed_pixel;
+
+            canvas_image[i] = mixed_pixel;
         }
     }
 
@@ -58,7 +74,7 @@ function mix_frame()
 
 function bind_per_frame_uniforms()
 {
-    gl.uniform1ui(program_info.uniform_locations.frame_seed, frame_index * 843253);
+    gl.uniform1ui(program_info.uniform_locations.frame_seed, Math.random() * 4294967295);
 }
 
 function draw_frame()
@@ -83,6 +99,11 @@ function random_sphere()
 {
     const size = Math.random() * 0.15 + 0.05;
 
+    const possible_colors = [{r: 140, g: 235, b: 255}, {r: 255, g: 109, b: 201}];
+    const index = Math.floor(Math.random() * 2.0);
+
+    const this_color = possible_colors[index];
+
     return {
         position: {
             x: (Math.random() - 0.5) * 1.5,
@@ -95,6 +116,7 @@ function random_sphere()
             g: Math.random(),
             b: Math.random()
         },
+        // color: this_color,
         luminance: 0.0,
         smoothness: 0.05 + Math.random() * 0.9
     };
@@ -140,7 +162,7 @@ function initialize_spheres(amount)
                 g: sphere.color.g * max_factor,
                 b: sphere.color.b * max_factor
             };
-            sphere.luminance = Math.random() * 2.0 + 0.5;
+            sphere.luminance = Math.random() * 20.0 + 10.0;
         }
 
         spheres.push(sphere);
