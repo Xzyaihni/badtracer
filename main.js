@@ -10,6 +10,10 @@ const f_shader = `#version 300 es
 
 precision mediump float;
 
+// the fact that shaders have no exceptions or any way to debug them
+// is INSANE, who designs garbage like this? why r we ok with this?
+// but muh performance!!! consider this: debug and release profiles :ooooo
+
 out vec4 frag_color;
 
 const ivec2 CANVAS_DIMENSIONS = ivec2(640, 640);
@@ -24,25 +28,17 @@ uniform vec3 spheres_color[SPHERES_AMOUNT];
 uniform float spheres_luminance[SPHERES_AMOUNT];
 uniform float spheres_smoothness[SPHERES_AMOUNT];
 
+uniform vec3 camera_pos;
+uniform vec3 camera_forward_n;
+uniform vec3 camera_right_n;
+uniform vec3 camera_up_n;
+
 uniform uint frame_seed;
 
 const vec3 topmax_background_color = vec3(0.8, 0.8, 1.0);
 const vec3 topmin_background_color = vec3(0.6, 0.6, 0.8);
 
-const vec3 camera_pos = vec3(0.0, 0.5, -0.4);
-const vec3 camera_target = vec3(0.0, 0.0, -1.0);
-
-const vec3 camera_up = vec3(0.0, 1.0, 0.0);
-
-const vec3 camera_forward = camera_pos - camera_target;
-const vec3 camera_right = cross(camera_up, camera_forward);
-
-const vec3 camera_forward_n = normalize(camera_forward);
-const vec3 camera_right_n = normalize(camera_right);
-const vec3 camera_up_n = cross(camera_forward_n, camera_right_n);
-
-const float camera_fov = 1.5;
-const float camera_blur = 0.015;
+const float camera_fov = 0.3;
 const float camera_focus = 0.15;
 
 const float background_luminance = 0.15;
@@ -52,6 +48,17 @@ const float PI = 3.1415926535897932384626433832795;
 
 const float MEAN = 0.0;
 const float SD = 1.0;
+
+uint random_u32(uint x)
+{
+    x ^= x >> 16;
+    x *= 0x21f0aaadu;
+    x ^= x >> 15;
+    x *= 0x735a2d97u;
+    x ^= x >> 15;
+
+    return x;
+}
 
 uint squares_random(uint seed_raw, inout uint w, inout uint current)
 {
@@ -116,17 +123,24 @@ RayInfo raycast(vec3 pos, vec3 dir)
 
         vec3 sphere_offset = pos - sphere_pos;
 
-        float a = dot(dir, dir);
-        float b = 2.0 * dot(sphere_offset, dir);
-        float c = dot(sphere_offset, sphere_offset) - sphere_radius * sphere_radius;
+	float left_sqrt = dot(dir, sphere_offset);
+	float left = left_sqrt * left_sqrt;
 
-        float d = b * b - 4.0 * a * c;
+	float right = dot(sphere_offset, sphere_offset) - (sphere_radius * sphere_radius);
 
-        bool sphere_intersected = d >= 0.0;
+	float nabla = left - right;
+
+        bool sphere_intersected = nabla >= 0.0;
 
         if (sphere_intersected)
         {
-            float hit_distance = (-b - sqrt(d)) / (2.0 * a);
+	    float nabla_sqrt = sqrt(nabla);
+	    float d = -dot(dir, sphere_offset);
+
+	    float first = d + nabla_sqrt;
+	    float second = d - nabla_sqrt;
+
+            float hit_distance = min(first, second);
 
             bool closer = !ray.intersected || (hit_distance < closest_sphere);
             bool visible = (hit_distance >= 0.0) && closer;
@@ -185,31 +199,32 @@ vec3 trace(vec3 pos, vec3 dir, inout uint seed)
 
 vec3 pixel_at(vec2 pixel, uint seed)
 {
-    vec3 shifted_camera_pos = camera_pos + vec3(direction_random(seed).xy * camera_blur, 1.0);
+    vec3 origin = camera_pos;
 
-    vec2 shifted_pixel = pixel - 0.5;
-    vec3 pixel_position =
-        (shifted_pixel.x * camera_right_n) * camera_fov
-        + (shifted_pixel.y * camera_up_n) * camera_fov
-        - camera_forward_n * camera_focus;
+    vec2 center_offset = pixel - 0.5;
 
-    vec3 ray_direction = normalize(pixel_position - shifted_camera_pos);
+    vec3 target = center_offset.x * camera_right_n * camera_fov
+      + center_offset.y * camera_up_n * camera_fov
+      + camera_forward_n * camera_focus;
 
-    return trace(shifted_camera_pos, ray_direction, seed);
+    vec3 direction = normalize(target);
+
+    return trace(origin, direction, seed);
 }
 
 void main()
 {
     vec2 pixel = gl_FragCoord.xy / vec2(CANVAS_DIMENSIONS);
     uint pixel_index = uint(gl_FragCoord.y) * uint(CANVAS_DIMENSIONS.x) + uint(gl_FragCoord.x);
-    uint seed = (pixel_index + 1u) * (pixel_index + 1u);
+    uint seed = random_u32(pixel_index);
 
-    const uint RAYS_PER_PIXEL = 32u;
+    const uint RAYS_PER_PIXEL = 16u;
 
     vec3 color = vec3(0.0);
     for(uint i = 0u; i < RAYS_PER_PIXEL; ++i)
     {
-        uint seed_inner = squares_random(frame_seed, seed, i);
+        uint i_seed = random_u32(i);
+        uint seed_inner = squares_random(frame_seed, seed, i_seed);
         color += pixel_at(pixel, seed_inner);
     }
 
@@ -222,20 +237,39 @@ const gl = canvas.getContext("webgl2");
 const display_canvas = document.getElementById("display_canvas");
 const display_context = display_canvas.getContext("2d");
 
+const frame_counter_element = document.getElementById("frame_counter");
+
 let spheres_pos = [];
 let spheres_size = [];
 let spheres_color = [];
 let spheres_luminance = [];
 let spheres_smoothness = [];
 
+let camera_pos = [0.0, 0.5, -0.4];
+let camera_forward = [0.0, 0.0, 1.0];
+
 let program_info = null;
 
 let rendered_image = null;
 
+let previous_frame_time = 0.0;
+
 let frame_index = 0;
-const max_rays = 1000;
+let max_rays = 100;
+
+let keys_pressed = {
+    forward: false,
+    back: false,
+    left: false,
+    right: false,
+    up: false,
+    down: false
+};
 
 document.addEventListener("DOMContentLoaded", main);
+document.addEventListener("keydown", on_key_down);
+document.addEventListener("keyup", on_key_up);
+
 function main()
 {
     if (gl === null)
@@ -248,6 +282,11 @@ function main()
     }
 }
 
+function increase_max()
+{
+    max_rays = max_rays * 2;
+}
+
 function mix_frame()
 {
     const width = canvas.width;
@@ -258,20 +297,9 @@ function mix_frame()
     let canvas_image = new Uint8ClampedArray(total_size);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, canvas_image);
 
-    const display_image = display_context.getImageData(0, 0, width, height).data;
-
     if (rendered_image === null)
     {
-        rendered_image = new Float64Array(total_size);
-
-        for(let i = 0; i < total_size; ++i)
-        {
-            const this_pixel = display_image[i];
-
-            rendered_image[i] = this_pixel;
-
-            canvas_image[i] = this_pixel;
-        }
+        rendered_image = canvas_image;
     } else
     {
         const next_frame = frame_index + 1;
@@ -295,22 +323,225 @@ function bind_per_frame_uniforms()
     gl.uniform1ui(program_info.uniform_locations.frame_seed, Math.random() * 4294967295);
 }
 
-function draw_frame()
+function clear_rendered()
 {
-    bind_per_frame_uniforms();
+    rendered_image = null;
+    frame_index = 0;
+}
 
-    //draw the rectangle with everything on it
-    //0 offset 4 vertices
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+function array_add(a, b)
+{
+    return a.map((x, i) => x + b[i]);
+}
 
-    mix_frame();
+function array_sub(a, b)
+{
+    return a.map((x, i) => x - b[i]);
+}
 
-    frame_index += 1;
+function array_mul(a, s)
+{
+    return a.map((x) => x * s);
+}
+
+function array_div(a, s)
+{
+    return a.map((x) => x / s);
+}
+
+function array_negate(a)
+{
+    return a.map((x) => -x);
+}
+
+function cross_2d(a, b)
+{
+    return a[0] * b[1] - b[0] * a[1];
+}
+
+function cross_3d(a, b)
+{
+    return [
+	cross_2d([a[1], a[2]], [b[1], b[2]]),
+	cross_2d([a[2], a[0]], [b[2], b[0]]),
+	cross_2d([a[0], a[1]], [b[0], b[1]])
+    ];
+}
+
+function magnitude(a)
+{
+    return Math.sqrt(a.map((x) => x * x).reduce((acc, x) => acc + x, 0));
+}
+
+function normalize(a)
+{
+    return array_div(a, magnitude(a));
+}
+
+function is_normalized(a)
+{
+    return Math.abs(magnitude(a) - 1.0) < 0.001;
+}
+
+function create_basis(forward, other)
+{
+    if (!is_normalized(forward))
+    {
+	alert("forward vector isnt normalized in create_basis, fix that!");
+    }
+
+    if (!is_normalized(other))
+    {
+	alert("second vector isnt normalized in create_basis!!! bad!!");
+    }
+
+    const right_un = cross_3d(other, forward);
+
+    if (magnitude(right_un) <= 0.0)
+    {
+	alert("forward and second vectors in create_basis must not be parallel, ITS OVER");
+    }
+
+    const right = normalize(right_un);
+    const up = normalize(cross_3d(forward, right));
+
+    return {
+	forward,
+	right,
+	up
+    }
+}
+
+function current_camera()
+{
+    return {
+	position: camera_pos,
+	basis: create_basis(camera_forward, [0.0, 1.0, 0.0])
+    }
+}
+
+function camera_changed()
+{
+    bind_camera_uniforms(current_camera());
+    clear_rendered();
+}
+
+function get_key_changer(e)
+{
+    switch (e.code)
+    {
+        case "KeyW":
+	  return (x) => { keys_pressed.forward = x };
+
+        case "KeyS":
+	  return (x) => { keys_pressed.back = x };
+
+        case "KeyA":
+	  return (x) => { keys_pressed.left = x };
+
+        case "KeyD":
+	  return (x) => { keys_pressed.right = x };
+
+	case "Space":
+	  return (x) => { keys_pressed.up = x };
+
+	case "KeyC":
+	  return (x) => { keys_pressed.down = x };
+
+	default:
+	  return (_) => {};
+    }
+}
+
+function on_key_down(e)
+{
+    get_key_changer(e)(true);
+}
+
+function on_key_up(e)
+{
+    get_key_changer(e)(false);
+}
+
+function movement_directions()
+{
+    const camera = current_camera().basis;
+
+    const directions = [];
+
+    if (keys_pressed.forward)
+    {
+	directions.push(camera.forward);
+    }
+
+    if (keys_pressed.back)
+    {
+	directions.push(array_negate(camera.forward));
+    }
+
+    if (keys_pressed.left)
+    {
+	directions.push(array_negate(camera.right));
+    }
+
+    if (keys_pressed.right)
+    {
+	directions.push(camera.right);
+    }
+
+    if (keys_pressed.up)
+    {
+	directions.push([0.0, 1.0, 0.0]);
+    }
+
+    if (keys_pressed.down)
+    {
+	directions.push([0.0, -1.0, 0.0]);
+    }
+
+    return directions;
+}
+
+function handle_inputs(dt)
+{
+    const directions = movement_directions(dt);
+
+    if (directions.length === 0)
+    {
+	return;
+    }
+
+    const speed = 0.02 * dt;
+
+    directions.forEach((direction) => { camera_pos = array_add(camera_pos, array_mul(direction, speed)); });
+
+    camera_changed();
+}
+
+function draw_frame(current_time)
+{
+    const dt = Math.min(current_time - previous_frame_time, 0.5);
+    previous_frame_time = current_time;
+
+    handle_inputs(dt);
 
     if (frame_index < max_rays)
     {
-        requestAnimationFrame(draw_frame);
+	bind_per_frame_uniforms();
+
+	//draw the rectangle with everything on it
+	//0 offset 4 vertices
+	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+	mix_frame();
+
+	frame_index += 1;
+
+	const progress = (frame_index / max_rays) * 100.0;
+	frame_counter_element.innerHTML = "progress: " + progress.toFixed(1) + "%";
     }
+
+    requestAnimationFrame(draw_frame);
 }
 
 function random_sphere()
@@ -326,7 +557,7 @@ function random_sphere()
         position: {
             x: (Math.random() - 0.5) * 1.5,
             y: size + (Math.random() - 0.2) * 0.09,
-            z: -Math.random() * 0.7 + 0.2
+            z: Math.random() * 0.7 + 0.2
         },
         size: size,
         color: {
@@ -406,6 +637,15 @@ function initialize_spheres(amount)
     }
 }
 
+function bind_camera_uniforms(camera)
+{
+    gl.uniform3fv(program_info.uniform_locations.camera_pos, camera.position);
+
+    gl.uniform3fv(program_info.uniform_locations.camera_forward_n, camera.basis.forward);
+    gl.uniform3fv(program_info.uniform_locations.camera_right_n, camera.basis.right);
+    gl.uniform3fv(program_info.uniform_locations.camera_up_n, camera.basis.up);
+}
+
 function bind_uniforms()
 {
     if (program_info === null)
@@ -418,6 +658,8 @@ function bind_uniforms()
     gl.uniform3fv(program_info.uniform_locations.spheres_color, spheres_color);
     gl.uniform1fv(program_info.uniform_locations.spheres_luminance, spheres_luminance);
     gl.uniform1fv(program_info.uniform_locations.spheres_smoothness, spheres_smoothness);
+
+    bind_camera_uniforms(current_camera());
 }
 
 function initialize_scene()
@@ -501,6 +743,11 @@ function attributes_info()
     add_uniform("spheres_color");
     add_uniform("spheres_luminance");
     add_uniform("spheres_smoothness");
+
+    add_uniform("camera_pos");
+    add_uniform("camera_forward_n");
+    add_uniform("camera_right_n");
+    add_uniform("camera_up_n");
 
     add_uniform("frame_seed");
 
