@@ -25,23 +25,24 @@ const int BOUNCE_COUNT = 15;
 uniform vec3 spheres_pos[SPHERES_AMOUNT];
 uniform float spheres_size[SPHERES_AMOUNT];
 uniform vec3 spheres_color[SPHERES_AMOUNT];
-uniform float spheres_luminance[SPHERES_AMOUNT];
+uniform vec3 spheres_emissive_color[SPHERES_AMOUNT];
 uniform float spheres_smoothness[SPHERES_AMOUNT];
 
 uniform vec3 camera_pos;
 uniform vec3 camera_forward_n;
 uniform vec3 camera_right_n;
 uniform vec3 camera_up_n;
+uniform float camera_focus;
 
 uniform uint frame_seed[5];
 
-const vec3 topmax_background_color = vec3(0.8, 0.8, 1.0);
-const vec3 topmin_background_color = vec3(0.6, 0.6, 0.8);
+uniform vec3 topmax_background_color;
+uniform vec3 topmin_background_color;
+uniform vec3 sky_color;
 
-const float camera_fov = 0.3;
-const float camera_focus = 0.15;
+const float CAMERA_BLUR = 0.005;
 
-const float background_luminance = 0.15;
+const float SKY_LIGHT_SIZE = 0.2;
 
 const float PI = 3.1415926535897932384626433832795;
 
@@ -116,6 +117,11 @@ float uniform_random(inout XorwowState state)
     return float(xorwow(state)) / float(~0u);
 }
 
+float offset_random(inout XorwowState state)
+{
+    return uniform_random(state) * 2.0 - 1.0;
+}
+
 float gauss_random(inout XorwowState state)
 {
     float theta = 2.0 * PI * uniform_random(state);
@@ -131,9 +137,13 @@ vec3 direction_random(inout XorwowState state)
 
 vec3 background_color(vec3 dir)
 {
-    float a = 1.0 + dir.y * 8.0;
+    float a = dir.y * 3.0;
 
-    return mix(topmin_background_color, topmax_background_color, a);
+    vec3 background = mix(topmin_background_color, topmax_background_color, clamp(a, 0.0, 1.0));
+
+    float light_amount = (distance(dir, vec3(0.37139, 0.742781, 0.55708)) - SKY_LIGHT_SIZE) * 10.0;
+
+    return mix(sky_color, background, clamp(light_amount, 0.0, 1.0));
 }
 
 struct RayInfo
@@ -142,7 +152,7 @@ struct RayInfo
     vec3 color;
     vec3 point;
     vec3 normal;
-    float luminance;
+    vec3 emissive_color;
     float smoothness;
 };
 
@@ -193,7 +203,7 @@ RayInfo raycast(vec3 pos, vec3 dir)
                 ray.point = hit_point;
                 ray.normal = hit_normal;
                 ray.color = spheres_color[i];
-                ray.luminance = spheres_luminance[i];
+                ray.emissive_color = spheres_emissive_color[i];
                 ray.smoothness = spheres_smoothness[i];
             }
         }
@@ -213,19 +223,17 @@ vec3 trace(vec3 pos, vec3 dir, inout XorwowState state)
 
         if (ray.intersected)
         {
-            total_color *= ray.color;
-            illuminated_color += ray.luminance * total_color;
-
-            pos = ray.point;
-
             vec3 diffuse_dir = normalize(ray.normal + direction_random(state));
             vec3 specular_dir = reflect(dir, ray.normal);
 
             dir = mix(diffuse_dir, specular_dir, ray.smoothness);
+	    pos = ray.point;
+
+            illuminated_color += ray.emissive_color * total_color;
+            total_color *= ray.color;
         } else
         {
-            total_color *= background_color(dir);
-            illuminated_color += background_luminance * total_color;
+            illuminated_color += background_color(dir) * total_color;
             break;
         }
     }
@@ -235,15 +243,21 @@ vec3 trace(vec3 pos, vec3 dir, inout XorwowState state)
 
 vec3 pixel_at(vec2 pixel, inout XorwowState state)
 {
-    vec3 origin = camera_pos;
+    vec3 shift = vec3(CAMERA_BLUR);
+    shift.x *= offset_random(state);
+    shift.y *= offset_random(state);
+    shift.z *= offset_random(state);
+
+    vec3 origin = camera_pos + shift;
 
     vec2 center_offset = pixel - 0.5;
 
-    vec3 target = center_offset.x * camera_right_n * camera_fov
-      + center_offset.y * camera_up_n * camera_fov
-      + camera_forward_n * camera_focus;
+    vec3 target = camera_pos
+      + center_offset.x * camera_right_n * camera_focus
+      + center_offset.y * camera_up_n * camera_focus
+      + camera_forward_n * camera_focus * 0.5;
 
-    vec3 direction = normalize(target);
+    vec3 direction = normalize(target - origin);
 
     return trace(origin, direction, state);
 }
@@ -271,7 +285,12 @@ void main()
         color += pixel_at(pixel, state);
     }
 
-    frag_color = vec4(color / float(RAYS_PER_PIXEL), 1.0);
+    vec3 current_color = color / float(RAYS_PER_PIXEL);
+
+    float gamma = 2.2;
+    vec3 mapped_color = pow(current_color / (current_color + vec3(1.0)), vec3(1.0 / gamma));
+
+    frag_color = vec4(mapped_color, 1.0);
 }`;
 const SPHERES_AMOUNT = 10; //COPY TO JS
 const canvas = new OffscreenCanvas(640, 640);
@@ -283,16 +302,22 @@ const display_context = display_canvas.getContext("2d");
 const frame_counter_element = document.getElementById("frame_counter");
 
 const mouse_sensitivity_element = document.getElementById("mouse_sensitivity");
+const camera_focus_element = document.getElementById("focus_slider");
+
+const day_checkbox = document.getElementById("day_checkbox");
+
+let is_daytime = false;
 
 let spheres_pos = [];
 let spheres_size = [];
 let spheres_color = [];
-let spheres_luminance = [];
+let spheres_emissive_color = [];
 let spheres_smoothness = [];
 
 let camera_pos = [0.0, 0.5, -0.4];
 let camera_yaw = 0.0;
 let camera_pitch = 0.0;
+let camera_focus = 0.0;
 
 let mouse_x_this_frame = 0.0;
 let mouse_y_this_frame = 0.0;
@@ -324,6 +349,11 @@ display_canvas.addEventListener("click", async () => lock_pointer(display_canvas
 
 on_mouse_sensitivity(mouse_sensitivity_element);
 mouse_sensitivity_element.addEventListener("input", (e) => on_mouse_sensitivity(e.target));
+
+on_camera_focus(camera_focus_element);
+camera_focus_element.addEventListener("input", (e) => on_camera_focus(e.target));
+
+day_checkbox.addEventListener("change", (e) => set_daytime(e.target.checked));
 
 document.addEventListener("pointerlockchange", (e) => { is_mouse_locked = document.pointerLockElement != null; });
 
@@ -507,6 +537,7 @@ function current_camera()
 {
     return {
 	position: camera_pos,
+	focus: camera_focus,
 	basis: create_basis(camera_forward(camera_yaw, camera_pitch), [0.0, 1.0, 0.0])
     }
 }
@@ -514,6 +545,41 @@ function current_camera()
 function camera_changed()
 {
     bind_camera_uniforms(current_camera());
+    clear_rendered();
+}
+
+function current_sky()
+{
+    if (is_daytime)
+    {
+	const back_light = 1.0;
+
+	return {
+	    top: array_mul([0.198, 0.714, 0.954], back_light * 0.95),
+	    bottom: array_mul([0.732, 0.915, 1.0], back_light),
+	    color: array_mul([1.0, 1.0, 1.0], 15.0)
+	}
+    } else
+    {
+	const back_light = 0.001;
+	return {
+	    top: array_mul([0.115, 0.144, 0.272], back_light),
+	    bottom: array_mul([0.209, 0.234, 0.346], back_light),
+	    color: array_mul([0.5, 0.6, 1.0], 0.05)
+	}
+    }
+}
+
+function set_daytime(new_state)
+{
+    if (is_daytime === new_state)
+    {
+	return;
+    }
+
+    is_daytime = new_state;
+
+    bind_sky_uniforms(current_sky());
     clear_rendered();
 }
 
@@ -552,6 +618,12 @@ async function lock_pointer(target)
 function on_mouse_sensitivity(e)
 {
     mouse_sensitivity = e.value * e.value;
+}
+
+function on_camera_focus(e)
+{
+    camera_focus = e.value;
+    camera_changed();
 }
 
 function on_mouse_move(e)
@@ -704,8 +776,11 @@ function random_sphere()
             g: Math.random(),
             b: Math.random()
         },
-        // color: this_color,
-        luminance: 0.0,
+	emissive_color: {
+	    r: 0.0,
+	    g: 0.0,
+	    b: 0.0
+	},
         smoothness: 0.05 + Math.random() * 0.9
     };
 }
@@ -725,8 +800,12 @@ function initialize_spheres(amount)
                 g: 1.0,
                 b: 1.0
             },
-            luminance: 0.0,
-            smoothness: 0.0
+            emissive_color: {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0
+            },
+            smoothness: 0.02
         }
     ];
 
@@ -740,17 +819,18 @@ function initialize_spheres(amount)
         if (i < lights_amount)
         {
             //this one glows
-            const c_color = sphere.color;
-            const smallest_color = Math.min(Math.min(c_color.r, c_color.g), c_color.b);
-
-            const max_factor = 1.0 / smallest_color;
-
-            sphere.color = {
-                r: sphere.color.r * max_factor,
-                g: sphere.color.g * max_factor,
-                b: sphere.color.b * max_factor
+	    const scale = Math.random() * 1.0 + 0.2;
+            sphere.emissive_color = {
+                r: sphere.color.r * scale,
+                g: sphere.color.g * scale,
+                b: sphere.color.b * scale
             };
-            sphere.luminance = Math.random() * 20.0 + 10.0;
+
+	    sphere.color = {
+		r: 0.0,
+		g: 0.0,
+		b: 0.0
+	    };
         }
 
         spheres.push(sphere);
@@ -770,7 +850,9 @@ function initialize_spheres(amount)
         spheres_color.push(sphere.color.g);
         spheres_color.push(sphere.color.b);
 
-        spheres_luminance.push(sphere.luminance);
+        spheres_emissive_color.push(sphere.emissive_color.r);
+        spheres_emissive_color.push(sphere.emissive_color.g);
+        spheres_emissive_color.push(sphere.emissive_color.b);
 
         spheres_smoothness.push(sphere.smoothness);
     }
@@ -778,11 +860,34 @@ function initialize_spheres(amount)
 
 function bind_camera_uniforms(camera)
 {
+    if (program_info === null)
+    {
+	return null;
+    }
+
     gl.uniform3fv(program_info.uniform_locations.camera_pos, camera.position);
 
     gl.uniform3fv(program_info.uniform_locations.camera_forward_n, camera.basis.forward);
     gl.uniform3fv(program_info.uniform_locations.camera_right_n, camera.basis.right);
     gl.uniform3fv(program_info.uniform_locations.camera_up_n, camera.basis.up);
+
+    gl.uniform1f(program_info.uniform_locations.camera_focus, camera.focus);
+}
+
+function bind_sky_uniforms(sky)
+{
+    gl.uniform3fv(program_info.uniform_locations.topmax_background_color, sky.top);
+    gl.uniform3fv(program_info.uniform_locations.topmin_background_color, sky.bottom);
+    gl.uniform3fv(program_info.uniform_locations.sky_color, sky.color);
+}
+
+function bind_sphere_uniforms()
+{
+    gl.uniform3fv(program_info.uniform_locations.spheres_pos, spheres_pos);
+    gl.uniform1fv(program_info.uniform_locations.spheres_size, spheres_size);
+    gl.uniform3fv(program_info.uniform_locations.spheres_color, spheres_color);
+    gl.uniform3fv(program_info.uniform_locations.spheres_emissive_color, spheres_emissive_color);
+    gl.uniform1fv(program_info.uniform_locations.spheres_smoothness, spheres_smoothness);
 }
 
 function bind_uniforms()
@@ -792,13 +897,9 @@ function bind_uniforms()
         return null;
     }
 
-    gl.uniform3fv(program_info.uniform_locations.spheres_pos, spheres_pos);
-    gl.uniform1fv(program_info.uniform_locations.spheres_size, spheres_size);
-    gl.uniform3fv(program_info.uniform_locations.spheres_color, spheres_color);
-    gl.uniform1fv(program_info.uniform_locations.spheres_luminance, spheres_luminance);
-    gl.uniform1fv(program_info.uniform_locations.spheres_smoothness, spheres_smoothness);
-
+    bind_sphere_uniforms();
     bind_camera_uniforms(current_camera());
+    bind_sky_uniforms(current_sky());
 }
 
 function initialize_scene()
@@ -880,15 +981,21 @@ function attributes_info()
     add_uniform("spheres_pos");
     add_uniform("spheres_size");
     add_uniform("spheres_color");
-    add_uniform("spheres_luminance");
+    add_uniform("spheres_emissive_color");
     add_uniform("spheres_smoothness");
 
     add_uniform("camera_pos");
     add_uniform("camera_forward_n");
     add_uniform("camera_right_n");
     add_uniform("camera_up_n");
+    add_uniform("camera_focus");
 
     add_uniform("frame_seed");
+
+    add_uniform("topmax_background_color");
+    add_uniform("topmin_background_color");
+    add_uniform("sky_color");
+    add_uniform("background_luminance");
 
     return program_info;
 }

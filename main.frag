@@ -17,23 +17,24 @@ const int BOUNCE_COUNT = 15;
 uniform vec3 spheres_pos[SPHERES_AMOUNT];
 uniform float spheres_size[SPHERES_AMOUNT];
 uniform vec3 spheres_color[SPHERES_AMOUNT];
-uniform float spheres_luminance[SPHERES_AMOUNT];
+uniform vec3 spheres_emissive_color[SPHERES_AMOUNT];
 uniform float spheres_smoothness[SPHERES_AMOUNT];
 
 uniform vec3 camera_pos;
 uniform vec3 camera_forward_n;
 uniform vec3 camera_right_n;
 uniform vec3 camera_up_n;
+uniform float camera_focus;
 
 uniform uint frame_seed[5];
 
-const vec3 topmax_background_color = vec3(0.8, 0.8, 1.0);
-const vec3 topmin_background_color = vec3(0.6, 0.6, 0.8);
+uniform vec3 topmax_background_color;
+uniform vec3 topmin_background_color;
+uniform vec3 sky_color;
 
-const float camera_fov = 0.3;
-const float camera_focus = 0.15;
+const float CAMERA_BLUR = 0.005;
 
-const float background_luminance = 0.15;
+const float SKY_LIGHT_SIZE = 0.2;
 
 const float PI = 3.1415926535897932384626433832795;
 
@@ -108,6 +109,11 @@ float uniform_random(inout XorwowState state)
     return float(xorwow(state)) / float(~0u);
 }
 
+float offset_random(inout XorwowState state)
+{
+    return uniform_random(state) * 2.0 - 1.0;
+}
+
 float gauss_random(inout XorwowState state)
 {
     float theta = 2.0 * PI * uniform_random(state);
@@ -123,9 +129,13 @@ vec3 direction_random(inout XorwowState state)
 
 vec3 background_color(vec3 dir)
 {
-    float a = 1.0 + dir.y * 8.0;
+    float a = dir.y * 3.0;
 
-    return mix(topmin_background_color, topmax_background_color, a);
+    vec3 background = mix(topmin_background_color, topmax_background_color, clamp(a, 0.0, 1.0));
+
+    float light_amount = (distance(dir, vec3(0.37139, 0.742781, 0.55708)) - SKY_LIGHT_SIZE) * 10.0;
+
+    return mix(sky_color, background, clamp(light_amount, 0.0, 1.0));
 }
 
 struct RayInfo
@@ -134,7 +144,7 @@ struct RayInfo
     vec3 color;
     vec3 point;
     vec3 normal;
-    float luminance;
+    vec3 emissive_color;
     float smoothness;
 };
 
@@ -185,7 +195,7 @@ RayInfo raycast(vec3 pos, vec3 dir)
                 ray.point = hit_point;
                 ray.normal = hit_normal;
                 ray.color = spheres_color[i];
-                ray.luminance = spheres_luminance[i];
+                ray.emissive_color = spheres_emissive_color[i];
                 ray.smoothness = spheres_smoothness[i];
             }
         }
@@ -205,19 +215,17 @@ vec3 trace(vec3 pos, vec3 dir, inout XorwowState state)
 
         if (ray.intersected)
         {
-            total_color *= ray.color;
-            illuminated_color += ray.luminance * total_color;
-
-            pos = ray.point;
-
             vec3 diffuse_dir = normalize(ray.normal + direction_random(state));
             vec3 specular_dir = reflect(dir, ray.normal);
 
             dir = mix(diffuse_dir, specular_dir, ray.smoothness);
+	    pos = ray.point;
+
+            illuminated_color += ray.emissive_color * total_color;
+            total_color *= ray.color;
         } else
         {
-            total_color *= background_color(dir);
-            illuminated_color += background_luminance * total_color;
+            illuminated_color += background_color(dir) * total_color;
             break;
         }
     }
@@ -227,15 +235,21 @@ vec3 trace(vec3 pos, vec3 dir, inout XorwowState state)
 
 vec3 pixel_at(vec2 pixel, inout XorwowState state)
 {
-    vec3 origin = camera_pos;
+    vec3 shift = vec3(CAMERA_BLUR);
+    shift.x *= offset_random(state);
+    shift.y *= offset_random(state);
+    shift.z *= offset_random(state);
+
+    vec3 origin = camera_pos + shift;
 
     vec2 center_offset = pixel - 0.5;
 
-    vec3 target = center_offset.x * camera_right_n * camera_fov
-      + center_offset.y * camera_up_n * camera_fov
-      + camera_forward_n * camera_focus;
+    vec3 target = camera_pos
+      + center_offset.x * camera_right_n * camera_focus
+      + center_offset.y * camera_up_n * camera_focus
+      + camera_forward_n * camera_focus * 0.5;
 
-    vec3 direction = normalize(target);
+    vec3 direction = normalize(target - origin);
 
     return trace(origin, direction, state);
 }
@@ -263,5 +277,10 @@ void main()
         color += pixel_at(pixel, state);
     }
 
-    frag_color = vec4(color / float(RAYS_PER_PIXEL), 1.0);
+    vec3 current_color = color / float(RAYS_PER_PIXEL);
+
+    float gamma = 2.2;
+    vec3 mapped_color = pow(current_color / (current_color + vec3(1.0)), vec3(1.0 / gamma));
+
+    frag_color = vec4(mapped_color, 1.0);
 }
