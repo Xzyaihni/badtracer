@@ -38,6 +38,7 @@
     </style>
   </head>
   <body>
+    <p class="centered">w/a/s/d to move, click on picture to look around</p>
     <div class="centered" id="main_grid">
       <canvas id="display_canvas" width="640" height="640">
         sowy couldnt display canvas, something wrong ; -;
@@ -45,6 +46,7 @@
     </div>
     <p class="centered" id="frame_counter">undefined</p>
     <div class="centered">
+      <input type="range" min="0.00001" max="1.0" value="0.2" step="any" id="mouse_sensitivity">
       <input type="button" value="more iterations" onclick="increase_max()">
     </div>
   </body>

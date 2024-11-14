@@ -239,6 +239,8 @@ const display_context = display_canvas.getContext("2d");
 
 const frame_counter_element = document.getElementById("frame_counter");
 
+const mouse_sensitivity_element = document.getElementById("mouse_sensitivity");
+
 let spheres_pos = [];
 let spheres_size = [];
 let spheres_color = [];
@@ -246,11 +248,20 @@ let spheres_luminance = [];
 let spheres_smoothness = [];
 
 let camera_pos = [0.0, 0.5, -0.4];
-let camera_forward = [0.0, 0.0, 1.0];
+let camera_yaw = 0.0;
+let camera_pitch = 0.0;
+
+let mouse_x_this_frame = 0.0;
+let mouse_y_this_frame = 0.0;
+
+let mouse_sensitivity = 0.0;
+let is_mouse_locked = false;
 
 let program_info = null;
 
+// use kahan sum to sum up all frames
 let rendered_image = null;
+let rendered_image_comp = null;
 
 let previous_frame_time = 0.0;
 
@@ -266,9 +277,18 @@ let keys_pressed = {
     down: false
 };
 
+display_canvas.addEventListener("click", async () => lock_pointer(display_canvas));
+
+on_mouse_sensitivity(mouse_sensitivity_element);
+mouse_sensitivity_element.addEventListener("input", (e) => on_mouse_sensitivity(e.target));
+
+document.addEventListener("pointerlockchange", (e) => { is_mouse_locked = document.pointerLockElement != null; });
+
 document.addEventListener("DOMContentLoaded", main);
+
 document.addEventListener("keydown", on_key_down);
 document.addEventListener("keyup", on_key_up);
+document.addEventListener("mousemove", on_mouse_move)
 
 function main()
 {
@@ -284,7 +304,13 @@ function main()
 
 function increase_max()
 {
+    const previous = max_rays;
     max_rays = max_rays * 2;
+
+    const change = previous / max_rays;
+
+    rendered_image = rendered_image.map((x) => x * change);
+    rendered_image_comp = rendered_image_comp.map((x) => x * change);
 }
 
 function mix_frame()
@@ -299,18 +325,28 @@ function mix_frame()
 
     if (rendered_image === null)
     {
-        rendered_image = canvas_image;
-    } else
-    {
-        const next_frame = frame_index + 1;
+	rendered_image = [];
+	rendered_image_comp = [];
+
         for(let i = 0; i < total_size; ++i)
         {
-            const mixed_pixel =
-                rendered_image[i] * (frame_index / next_frame) + canvas_image[i] / next_frame;
+            rendered_image[i] = canvas_image[i] / max_rays;
+	    rendered_image_comp[i] = 0.0;
+        }
+    } else
+    {
+	const to_max_ratio = max_rays / frame_index;
+        for(let i = 0; i < total_size; ++i)
+        {
+	    const current_pixel = canvas_image[i] / max_rays;
 
-            rendered_image[i] = mixed_pixel;
+	    const y = current_pixel - rendered_image_comp[i];
+	    const t = rendered_image[i] + y;
 
-            canvas_image[i] = mixed_pixel;
+	    rendered_image_comp[i] = (t - rendered_image[i]) - y;
+            rendered_image[i] = t;
+
+            canvas_image[i] = rendered_image[i] * to_max_ratio;
         }
     }
 
@@ -387,12 +423,12 @@ function create_basis(forward, other)
 {
     if (!is_normalized(forward))
     {
-	alert("forward vector isnt normalized in create_basis, fix that!");
+	alert("forward vector (" + forward + ") isnt normalized in create_basis, fix that!");
     }
 
     if (!is_normalized(other))
     {
-	alert("second vector isnt normalized in create_basis!!! bad!!");
+	alert("second vector (" + other + ") isnt normalized in create_basis!!! bad!!");
     }
 
     const right_un = cross_3d(other, forward);
@@ -412,11 +448,20 @@ function create_basis(forward, other)
     }
 }
 
+function camera_forward(yaw, pitch)
+{
+    return [
+	Math.sin(yaw) * Math.cos(pitch),
+	-Math.sin(pitch),
+	Math.cos(yaw) * Math.cos(pitch)
+    ];
+}
+
 function current_camera()
 {
     return {
 	position: camera_pos,
-	basis: create_basis(camera_forward, [0.0, 1.0, 0.0])
+	basis: create_basis(camera_forward(camera_yaw, camera_pitch), [0.0, 1.0, 0.0])
     }
 }
 
@@ -451,6 +496,48 @@ function get_key_changer(e)
 	default:
 	  return (_) => {};
     }
+}
+
+async function lock_pointer(target)
+{
+    await target.requestPointerLock({ unadjustedMovement: true });
+}
+
+function on_mouse_sensitivity(e)
+{
+    mouse_sensitivity = e.value * e.value;
+}
+
+function on_mouse_move(e)
+{
+    mouse_x_this_frame += e.movementX;
+    mouse_y_this_frame += e.movementY;
+}
+
+function handle_mouse_inputs(dt)
+{
+    if (!is_mouse_locked)
+    {
+	return;
+    }
+
+    if (mouse_x_this_frame === 0.0 && mouse_y_this_frame === 0.0)
+    {
+	return;
+    }
+
+    const clamp = (x, low, high) => Math.max(low, Math.min(x, high));
+
+    camera_yaw += mouse_x_this_frame * mouse_sensitivity;
+    camera_pitch += mouse_y_this_frame * mouse_sensitivity;
+
+    const limit = Math.PI / 2.0;
+    camera_pitch = clamp(camera_pitch, -limit, limit);
+
+    mouse_x_this_frame = 0.0;
+    mouse_y_this_frame = 0.0;
+
+    camera_changed();
 }
 
 function on_key_down(e)
@@ -502,7 +589,7 @@ function movement_directions()
     return directions;
 }
 
-function handle_inputs(dt)
+function handle_movement_inputs(dt)
 {
     const directions = movement_directions(dt);
 
@@ -516,6 +603,12 @@ function handle_inputs(dt)
     directions.forEach((direction) => { camera_pos = array_add(camera_pos, array_mul(direction, speed)); });
 
     camera_changed();
+}
+
+function handle_inputs(dt)
+{
+    handle_movement_inputs(dt);
+    handle_mouse_inputs(dt);
 }
 
 function draw_frame(current_time)
