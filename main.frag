@@ -19,6 +19,7 @@ uniform float spheres_size[SPHERES_AMOUNT];
 uniform vec3 spheres_color[SPHERES_AMOUNT];
 uniform vec3 spheres_emissive_color[SPHERES_AMOUNT];
 uniform float spheres_smoothness[SPHERES_AMOUNT];
+uniform float spheres_surface_thickness[SPHERES_AMOUNT];
 
 uniform vec3 camera_pos;
 uniform vec3 camera_forward_n;
@@ -146,6 +147,7 @@ struct RayInfo
     vec3 normal;
     vec3 emissive_color;
     float smoothness;
+    float surface_thickness;
 };
 
 RayInfo raycast(vec3 pos, vec3 dir)
@@ -197,6 +199,7 @@ RayInfo raycast(vec3 pos, vec3 dir)
                 ray.color = spheres_color[i];
                 ray.emissive_color = spheres_emissive_color[i];
                 ray.smoothness = spheres_smoothness[i];
+		ray.surface_thickness = spheres_surface_thickness[i];
             }
         }
     }
@@ -218,11 +221,13 @@ vec3 trace(vec3 pos, vec3 dir, inout XorwowState state)
             vec3 diffuse_dir = normalize(ray.normal + direction_random(state));
             vec3 specular_dir = reflect(dir, ray.normal);
 
-            dir = mix(diffuse_dir, specular_dir, ray.smoothness);
+	    float surface_reflected = float(uniform_random(state) < ray.surface_thickness);
+
+            dir = mix(diffuse_dir, specular_dir, ray.smoothness * surface_reflected);
 	    pos = ray.point;
 
             illuminated_color += ray.emissive_color * total_color;
-            total_color *= ray.color;
+            total_color *= mix(ray.color, vec3(1.0), surface_reflected);
         } else
         {
             illuminated_color += background_color(dir) * total_color;

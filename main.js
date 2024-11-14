@@ -27,6 +27,7 @@ uniform float spheres_size[SPHERES_AMOUNT];
 uniform vec3 spheres_color[SPHERES_AMOUNT];
 uniform vec3 spheres_emissive_color[SPHERES_AMOUNT];
 uniform float spheres_smoothness[SPHERES_AMOUNT];
+uniform float spheres_surface_thickness[SPHERES_AMOUNT];
 
 uniform vec3 camera_pos;
 uniform vec3 camera_forward_n;
@@ -154,6 +155,7 @@ struct RayInfo
     vec3 normal;
     vec3 emissive_color;
     float smoothness;
+    float surface_thickness;
 };
 
 RayInfo raycast(vec3 pos, vec3 dir)
@@ -205,6 +207,7 @@ RayInfo raycast(vec3 pos, vec3 dir)
                 ray.color = spheres_color[i];
                 ray.emissive_color = spheres_emissive_color[i];
                 ray.smoothness = spheres_smoothness[i];
+		ray.surface_thickness = spheres_surface_thickness[i];
             }
         }
     }
@@ -226,11 +229,13 @@ vec3 trace(vec3 pos, vec3 dir, inout XorwowState state)
             vec3 diffuse_dir = normalize(ray.normal + direction_random(state));
             vec3 specular_dir = reflect(dir, ray.normal);
 
-            dir = mix(diffuse_dir, specular_dir, ray.smoothness);
+	    float surface_reflected = float(uniform_random(state) < ray.surface_thickness);
+
+            dir = mix(diffuse_dir, specular_dir, ray.smoothness * surface_reflected);
 	    pos = ray.point;
 
             illuminated_color += ray.emissive_color * total_color;
-            total_color *= ray.color;
+            total_color *= mix(ray.color, vec3(1.0), surface_reflected);
         } else
         {
             illuminated_color += background_color(dir) * total_color;
@@ -313,6 +318,7 @@ let spheres_size = [];
 let spheres_color = [];
 let spheres_emissive_color = [];
 let spheres_smoothness = [];
+let spheres_surface_thickness = [];
 
 let camera_pos = [0.0, 0.5, -0.4];
 let camera_yaw = 0.0;
@@ -755,6 +761,13 @@ function draw_frame(current_time)
     requestAnimationFrame(draw_frame);
 }
 
+function recreate_scene()
+{
+    initialize_spheres(SPHERES_AMOUNT);
+    bind_uniforms();
+    clear_rendered();
+}
+
 function random_sphere()
 {
     const size = Math.random() * 0.15 + 0.05;
@@ -781,7 +794,8 @@ function random_sphere()
 	    g: 0.0,
 	    b: 0.0
 	},
-        smoothness: 0.05 + Math.random() * 0.9
+        smoothness: 0.05 + Math.random() * 0.9,
+	surface_thickness: Math.random()
     };
 }
 
@@ -805,7 +819,8 @@ function initialize_spheres(amount)
                 g: 0.0,
                 b: 0.0
             },
-            smoothness: 0.02
+            smoothness: 0.02,
+	    surface_thickness: 0.5
         }
     ];
 
@@ -840,21 +855,22 @@ function initialize_spheres(amount)
     {
         let sphere = spheres[i];
 
-        spheres_pos.push(sphere.position.x);
-        spheres_pos.push(sphere.position.y);
-        spheres_pos.push(sphere.position.z);
+        spheres_pos[i * 3] = sphere.position.x;
+        spheres_pos[i * 3 + 1] = sphere.position.y;
+        spheres_pos[i * 3 + 2] = sphere.position.z;
 
-        spheres_size.push(sphere.size);
+        spheres_size[i] = sphere.size;
 
-        spheres_color.push(sphere.color.r);
-        spheres_color.push(sphere.color.g);
-        spheres_color.push(sphere.color.b);
+        spheres_color[i * 3] = sphere.color.r;
+        spheres_color[i * 3 + 1] = sphere.color.g;
+        spheres_color[i * 3 + 2] = sphere.color.b;
 
-        spheres_emissive_color.push(sphere.emissive_color.r);
-        spheres_emissive_color.push(sphere.emissive_color.g);
-        spheres_emissive_color.push(sphere.emissive_color.b);
+        spheres_emissive_color[i * 3] = sphere.emissive_color.r;
+        spheres_emissive_color[i * 3 + 1] = sphere.emissive_color.g;
+        spheres_emissive_color[i * 3 + 2] = sphere.emissive_color.b;
 
-        spheres_smoothness.push(sphere.smoothness);
+        spheres_smoothness[i] = sphere.smoothness;
+        spheres_surface_thickness[i] = sphere.surface_thickness;
     }
 }
 
@@ -888,6 +904,7 @@ function bind_sphere_uniforms()
     gl.uniform3fv(program_info.uniform_locations.spheres_color, spheres_color);
     gl.uniform3fv(program_info.uniform_locations.spheres_emissive_color, spheres_emissive_color);
     gl.uniform1fv(program_info.uniform_locations.spheres_smoothness, spheres_smoothness);
+    gl.uniform1fv(program_info.uniform_locations.spheres_surface_thickness, spheres_surface_thickness);
 }
 
 function bind_uniforms()
@@ -983,6 +1000,7 @@ function attributes_info()
     add_uniform("spheres_color");
     add_uniform("spheres_emissive_color");
     add_uniform("spheres_smoothness");
+    add_uniform("spheres_surface_thickness");
 
     add_uniform("camera_pos");
     add_uniform("camera_forward_n");
