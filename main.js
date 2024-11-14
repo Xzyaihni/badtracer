@@ -33,7 +33,7 @@ uniform vec3 camera_forward_n;
 uniform vec3 camera_right_n;
 uniform vec3 camera_up_n;
 
-uniform uint frame_seed;
+uniform uint frame_seed[5];
 
 const vec3 topmax_background_color = vec3(0.8, 0.8, 1.0);
 const vec3 topmin_background_color = vec3(0.6, 0.6, 0.8);
@@ -60,37 +60,73 @@ uint random_u32(uint x)
     return x;
 }
 
-uint squares_random(uint seed_raw, inout uint w, inout uint current)
+struct XorwowState
 {
-    uint seed = seed_raw | 0x80000001u;
+    uint s[5];
+    uint i;
+};
 
-    w += seed;
+// xorwow by marsaglia
+uint xorwow(inout XorwowState state)
+{
+    uint t = state.s[4];
 
-    current = (current * current) + w;
-    current = (current >> 16) | (current << 16);
+    uint previous = state.s[0];
+    state.s[4] = state.s[3];
+    state.s[3] = state.s[2];
+    state.s[2] = state.s[1];
+    state.s[1] = previous;
 
-    return current;
+    t ^= t >> 2;
+    t ^= t << 1;
+    t ^= previous ^ (previous << 4);
+
+    state.s[0] = t;
+
+    state.i += 362437u;
+
+    return t + state.i;
 }
 
-float uniform_random(inout uint seed)
+/*uint random_u32_seeded(inout uint x)
 {
-    seed = seed * 747796405u + 2891336453u;
-    seed = ((seed >> ((seed >> 28u) + 4u)) ^ seed) * 277803737u;
+    x = x * 747796405u + 2891336453u;
+    x = ((x >> ((x >> 28u) + 4u)) ^ x) * 277803737u;
 
-    return float(seed) / 4294967295.0;
+    return x;
+}*/
+
+/*uint pair_hash(uint a, uint b)
+{
+    uint prime = 110947u;
+    return (prime + a) * prime + b;
+}*/
+
+/*uint pair_hash(uint a, uint b)
+{
+    uint x = frame_seed[0];
+    uint y = frame_seed[1];
+    uint z = frame_seed[2];
+
+    return (x * a) + ((y * a) >> 32) + (y * b) + ((z * b) >> 32);
+}*/
+
+float uniform_random(inout XorwowState state)
+{
+    return float(xorwow(state)) / float(~0u);
 }
 
-float gauss_random(inout uint seed)
+float gauss_random(inout XorwowState state)
 {
-    float theta = 2.0 * PI * uniform_random(seed);
-    float dist = sqrt(-2.0 * log(1.0 - uniform_random(seed)));
+    float theta = 2.0 * PI * uniform_random(state);
+    float dist = sqrt(-2.0 * log(1.0 - uniform_random(state)));
 
     return MEAN + dist * cos(theta);
 }
 
-vec3 direction_random(inout uint seed)
+vec3 direction_random(inout XorwowState state)
 {
-    return normalize(vec3(gauss_random(seed), gauss_random(seed), gauss_random(seed)));
+    return normalize(vec3(gauss_random(state), gauss_random(state), gauss_random(state)));
 }
 
 vec3 background_color(vec3 dir)
@@ -166,7 +202,7 @@ RayInfo raycast(vec3 pos, vec3 dir)
     return ray;
 }
 
-vec3 trace(vec3 pos, vec3 dir, inout uint seed)
+vec3 trace(vec3 pos, vec3 dir, inout XorwowState state)
 {
     vec3 illuminated_color = vec3(0.0);
     vec3 total_color = vec3(1.0);
@@ -182,7 +218,7 @@ vec3 trace(vec3 pos, vec3 dir, inout uint seed)
 
             pos = ray.point;
 
-            vec3 diffuse_dir = normalize(ray.normal + direction_random(seed));
+            vec3 diffuse_dir = normalize(ray.normal + direction_random(state));
             vec3 specular_dir = reflect(dir, ray.normal);
 
             dir = mix(diffuse_dir, specular_dir, ray.smoothness);
@@ -197,7 +233,7 @@ vec3 trace(vec3 pos, vec3 dir, inout uint seed)
     return illuminated_color;
 }
 
-vec3 pixel_at(vec2 pixel, uint seed)
+vec3 pixel_at(vec2 pixel, inout XorwowState state)
 {
     vec3 origin = camera_pos;
 
@@ -209,23 +245,30 @@ vec3 pixel_at(vec2 pixel, uint seed)
 
     vec3 direction = normalize(target);
 
-    return trace(origin, direction, seed);
+    return trace(origin, direction, state);
 }
 
 void main()
 {
     vec2 pixel = gl_FragCoord.xy / vec2(CANVAS_DIMENSIONS);
-    uint pixel_index = uint(gl_FragCoord.y) * uint(CANVAS_DIMENSIONS.x) + uint(gl_FragCoord.x);
-    uint seed = random_u32(pixel_index);
 
-    const uint RAYS_PER_PIXEL = 16u;
+    uint a = uint(gl_FragCoord.x);
+    uint b = uint(gl_FragCoord.y);
+    uint index = a + b * uint(CANVAS_DIMENSIONS.x);
+
+    XorwowState state;
+    state.s = frame_seed;
+    state.s[4] = random_u32(index);
+    state.i = frame_seed[4];
+
+    xorwow(state);
+
+    const uint RAYS_PER_PIXEL = 32u;
 
     vec3 color = vec3(0.0);
     for(uint i = 0u; i < RAYS_PER_PIXEL; ++i)
     {
-        uint i_seed = random_u32(i);
-        uint seed_inner = squares_random(frame_seed, seed, i_seed);
-        color += pixel_at(pixel, seed_inner);
+        color += pixel_at(pixel, state);
     }
 
     frag_color = vec4(color / float(RAYS_PER_PIXEL), 1.0);
@@ -356,7 +399,10 @@ function mix_frame()
 
 function bind_per_frame_uniforms()
 {
-    gl.uniform1ui(program_info.uniform_locations.frame_seed, Math.random() * 4294967295);
+    const new_random = () => { return Math.floor(Math.random() * 4294967295); };
+    const seeds = [new_random(), new_random(), new_random(), new_random(), new_random()];
+
+    gl.uniform1uiv(program_info.uniform_locations.frame_seed, seeds);
 }
 
 function clear_rendered()

@@ -123,7 +123,10 @@ function mix_frame()
 
 function bind_per_frame_uniforms()
 {
-    gl.uniform1ui(program_info.uniform_locations.frame_seed, Math.random() * 4294967295);
+    const new_random = () => { return Math.floor(Math.random() * 4294967295); };
+    const seeds = [new_random(), new_random(), new_random(), new_random(), new_random()];
+
+    gl.uniform1uiv(program_info.uniform_locations.frame_seed, seeds);
 }
 
 function clear_rendered()
