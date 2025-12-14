@@ -11,6 +11,11 @@ const camera_focus_element = document.getElementById("focus_slider");
 
 const day_checkbox = document.getElementById("day_checkbox");
 
+const target_fps = 30.0;
+const target_ms = 1000.0 / target_fps;
+
+let rays_per_pixel = 1;
+
 let is_daytime = false;
 
 let spheres_pos = [];
@@ -40,7 +45,7 @@ let rendered_image_comp = null;
 let previous_frame_time = 0.0;
 
 let frame_index = 0;
-let max_rays = 100;
+let max_rays = 3200;
 
 let keys_pressed = {
     forward: false,
@@ -104,25 +109,25 @@ function mix_frame()
 
     if (rendered_image === null)
     {
-	rendered_image = [];
-	rendered_image_comp = [];
+        rendered_image = [];
+        rendered_image_comp = [];
 
         for(let i = 0; i < total_size; ++i)
         {
-            rendered_image[i] = canvas_image[i] / max_rays;
-	    rendered_image_comp[i] = 0.0;
+            rendered_image[i] = canvas_image[i] * rays_per_pixel / max_rays;
+            rendered_image_comp[i] = 0.0;
         }
     } else
     {
-	const to_max_ratio = max_rays / frame_index;
+        const to_max_ratio = max_rays / frame_index;
         for(let i = 0; i < total_size; ++i)
         {
-	    const current_pixel = canvas_image[i] / max_rays;
+            const current_pixel = canvas_image[i] * rays_per_pixel / max_rays;
 
-	    const y = current_pixel - rendered_image_comp[i];
-	    const t = rendered_image[i] + y;
+            const y = current_pixel - rendered_image_comp[i];
+            const t = rendered_image[i] + y;
 
-	    rendered_image_comp[i] = (t - rendered_image[i]) - y;
+            rendered_image_comp[i] = (t - rendered_image[i]) - y;
             rendered_image[i] = t;
 
             canvas_image[i] = rendered_image[i] * to_max_ratio;
@@ -131,6 +136,11 @@ function mix_frame()
 
     const canvas_data = new ImageData(canvas_image, width, height);
     display_context.putImageData(canvas_data, 0, 0);
+}
+
+function bind_rays_per_pixel()
+{
+    gl.uniform1ui(program_info.uniform_locations.rays_per_pixel, rays_per_pixel);
 }
 
 function bind_per_frame_uniforms()
@@ -180,9 +190,9 @@ function cross_2d(a, b)
 function cross_3d(a, b)
 {
     return [
-	cross_2d([a[1], a[2]], [b[1], b[2]]),
-	cross_2d([a[2], a[0]], [b[2], b[0]]),
-	cross_2d([a[0], a[1]], [b[0], b[1]])
+        cross_2d([a[1], a[2]], [b[1], b[2]]),
+        cross_2d([a[2], a[0]], [b[2], b[0]]),
+        cross_2d([a[0], a[1]], [b[0], b[1]])
     ];
 }
 
@@ -205,46 +215,46 @@ function create_basis(forward, other)
 {
     if (!is_normalized(forward))
     {
-	alert("forward vector (" + forward + ") isnt normalized in create_basis, fix that!");
+        alert("forward vector (" + forward + ") isnt normalized in create_basis, fix that!");
     }
 
     if (!is_normalized(other))
     {
-	alert("second vector (" + other + ") isnt normalized in create_basis!!! bad!!");
+        alert("second vector (" + other + ") isnt normalized in create_basis!!! bad!!");
     }
 
     const right_un = cross_3d(other, forward);
 
     if (magnitude(right_un) <= 0.0)
     {
-	alert("forward and second vectors in create_basis must not be parallel, ITS OVER");
+        alert("forward and second vectors in create_basis must not be parallel, ITS OVER");
     }
 
     const right = normalize(right_un);
     const up = normalize(cross_3d(forward, right));
 
     return {
-	forward,
-	right,
-	up
+        forward,
+        right,
+        up
     }
 }
 
 function camera_forward(yaw, pitch)
 {
     return [
-	Math.sin(yaw) * Math.cos(pitch),
-	-Math.sin(pitch),
-	Math.cos(yaw) * Math.cos(pitch)
+        Math.sin(yaw) * Math.cos(pitch),
+        -Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch)
     ];
 }
 
 function current_camera()
 {
     return {
-	position: camera_pos,
-	focus: camera_focus,
-	basis: create_basis(camera_forward(camera_yaw, camera_pitch), [0.0, 1.0, 0.0])
+        position: camera_pos,
+        focus: camera_focus,
+        basis: create_basis(camera_forward(camera_yaw, camera_pitch), [0.0, 1.0, 0.0])
     }
 }
 
@@ -258,21 +268,21 @@ function current_sky()
 {
     if (is_daytime)
     {
-	const back_light = 1.0;
+        const back_light = 1.0;
 
-	return {
-	    top: array_mul([0.198, 0.714, 0.954], back_light * 0.95),
-	    bottom: array_mul([0.732, 0.915, 1.0], back_light),
-	    color: array_mul([1.0, 1.0, 1.0], 15.0)
-	}
+        return {
+            top: array_mul([0.198, 0.714, 0.954], back_light * 0.95),
+            bottom: array_mul([0.732, 0.915, 1.0], back_light),
+            color: array_mul([1.0, 1.0, 1.0], 15.0)
+        }
     } else
     {
-	const back_light = 0.001;
-	return {
-	    top: array_mul([0.115, 0.144, 0.272], back_light),
-	    bottom: array_mul([0.209, 0.234, 0.346], back_light),
-	    color: array_mul([0.5, 0.6, 1.0], 0.05)
-	}
+        const back_light = 0.001;
+        return {
+            top: array_mul([0.115, 0.144, 0.272], back_light),
+            bottom: array_mul([0.209, 0.234, 0.346], back_light),
+            color: array_mul([0.5, 0.6, 1.0], 0.05)
+        }
     }
 }
 
@@ -280,7 +290,7 @@ function set_daytime(new_state)
 {
     if (is_daytime === new_state)
     {
-	return;
+        return;
     }
 
     is_daytime = new_state;
@@ -294,25 +304,25 @@ function get_key_changer(e)
     switch (e.code)
     {
         case "KeyW":
-	  return (x) => { keys_pressed.forward = x };
+          return (x) => { keys_pressed.forward = x };
 
         case "KeyS":
-	  return (x) => { keys_pressed.back = x };
+          return (x) => { keys_pressed.back = x };
 
         case "KeyA":
-	  return (x) => { keys_pressed.left = x };
+          return (x) => { keys_pressed.left = x };
 
         case "KeyD":
-	  return (x) => { keys_pressed.right = x };
+          return (x) => { keys_pressed.right = x };
 
-	case "Space":
-	  return (x) => { keys_pressed.up = x };
+        case "Space":
+          return (x) => { keys_pressed.up = x };
 
-	case "KeyC":
-	  return (x) => { keys_pressed.down = x };
+        case "KeyC":
+          return (x) => { keys_pressed.down = x };
 
-	default:
-	  return (_) => {};
+        default:
+          return (_) => {};
     }
 }
 
@@ -342,12 +352,12 @@ function handle_mouse_inputs(dt)
 {
     if (!is_mouse_locked)
     {
-	return;
+        return;
     }
 
     if (mouse_x_this_frame === 0.0 && mouse_y_this_frame === 0.0)
     {
-	return;
+        return;
     }
 
     const clamp = (x, low, high) => Math.max(low, Math.min(x, high));
@@ -382,32 +392,32 @@ function movement_directions()
 
     if (keys_pressed.forward)
     {
-	directions.push(camera.forward);
+        directions.push(camera.forward);
     }
 
     if (keys_pressed.back)
     {
-	directions.push(array_negate(camera.forward));
+        directions.push(array_negate(camera.forward));
     }
 
     if (keys_pressed.left)
     {
-	directions.push(array_negate(camera.right));
+        directions.push(array_negate(camera.right));
     }
 
     if (keys_pressed.right)
     {
-	directions.push(camera.right);
+        directions.push(camera.right);
     }
 
     if (keys_pressed.up)
     {
-	directions.push([0.0, 1.0, 0.0]);
+        directions.push([0.0, 1.0, 0.0]);
     }
 
     if (keys_pressed.down)
     {
-	directions.push([0.0, -1.0, 0.0]);
+        directions.push([0.0, -1.0, 0.0]);
     }
 
     return directions;
@@ -419,7 +429,7 @@ function handle_movement_inputs(dt)
 
     if (directions.length === 0)
     {
-	return;
+        return;
     }
 
     const speed = 0.625 * dt;
@@ -435,6 +445,35 @@ function handle_inputs(dt)
     handle_mouse_inputs(dt);
 }
 
+function update_progress()
+{
+    const progress = (frame_index / max_rays) * 100.0;
+    frame_counter_element.innerHTML = "progress: " + progress.toFixed(1) + "%";
+}
+
+function needs_drawing()
+{
+    return frame_index < max_rays;
+}
+
+function draw_once()
+{
+    bind_per_frame_uniforms();
+
+    //draw the rectangle with everything on it
+    //0 offset 4 vertices
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    mix_frame();
+
+    frame_index += rays_per_pixel;
+
+    if (frame_index > max_rays)
+    {
+        frame_index = max_rays;
+    }
+}
+
 function draw_frame(current_time)
 {
     const dt = Math.min(current_time - previous_frame_time, (1000.0 / 30.0)) * 0.001;
@@ -442,20 +481,52 @@ function draw_frame(current_time)
 
     handle_inputs(dt);
 
-    if (frame_index < max_rays)
+    if (needs_drawing())
     {
-	bind_per_frame_uniforms();
+        bind_rays_per_pixel();
 
-	//draw the rectangle with everything on it
-	//0 offset 4 vertices
-	gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        const before_draw = performance.now();
+        draw_once();
+        const after_draw = performance.now();
 
-	mix_frame();
+        const elapsed = after_draw - before_draw;
 
-	frame_index += 1;
+        const difference = target_ms - elapsed;
 
-	const progress = (frame_index / max_rays) * 100.0;
-	frame_counter_element.innerHTML = "progress: " + progress.toFixed(1) + "%";
+        const more_rays = difference > 0.0;
+
+        const distance = Math.abs(difference);
+
+        const distance_ratio = Math.max(distance, target_ms) / Math.min(distance, target_ms);
+
+        const factor_change = distance_ratio >= 1.5;
+
+        if (more_rays)
+        {
+            if (factor_change)
+            {
+                rays_per_pixel *= 2;
+            } else
+            {
+                rays_per_pixel += 1;
+            }
+        } else
+        {
+            if (factor_change)
+            {
+                rays_per_pixel = Math.floor(rays_per_pixel / 2);
+            } else
+            {
+                rays_per_pixel -= 1;
+            }
+
+            if (rays_per_pixel < 1)
+            {
+                rays_per_pixel = 1;
+            }
+        }
+
+        update_progress();
     }
 
     requestAnimationFrame(draw_frame);
@@ -489,13 +560,13 @@ function random_sphere()
             g: Math.random(),
             b: Math.random()
         },
-	emissive_color: {
-	    r: 0.0,
-	    g: 0.0,
-	    b: 0.0
-	},
+        emissive_color: {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0
+        },
         smoothness: 0.05 + Math.random() * 0.9,
-	surface_thickness: Math.random()
+        surface_thickness: Math.random()
     };
 }
 
@@ -520,7 +591,7 @@ function initialize_spheres(amount)
                 b: 0.0
             },
             smoothness: 0.02,
-	    surface_thickness: 0.5
+            surface_thickness: 0.5
         }
     ];
 
@@ -534,18 +605,18 @@ function initialize_spheres(amount)
         if (i < lights_amount)
         {
             //this one glows
-	    const scale = Math.random() * 1.0 + 0.2;
+            const scale = Math.random() * 1.0 + 0.2;
             sphere.emissive_color = {
                 r: sphere.color.r * scale,
                 g: sphere.color.g * scale,
                 b: sphere.color.b * scale
             };
 
-	    sphere.color = {
-		r: 0.0,
-		g: 0.0,
-		b: 0.0
-	    };
+            sphere.color = {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0
+            };
         }
 
         spheres.push(sphere);
@@ -578,7 +649,7 @@ function bind_camera_uniforms(camera)
 {
     if (program_info === null)
     {
-	return null;
+        return null;
     }
 
     gl.uniform3fv(program_info.uniform_locations.camera_pos, camera.position);
@@ -694,6 +765,8 @@ function attributes_info()
     {
         program_info.uniform_locations[name] = gl.getUniformLocation(shader_program, name);
     };
+
+    add_uniform("rays_per_pixel");
 
     add_uniform("spheres_pos");
     add_uniform("spheres_size");

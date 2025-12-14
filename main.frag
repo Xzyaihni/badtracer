@@ -14,6 +14,8 @@ const int SPHERES_AMOUNT = 10; //COPY TO JS
 
 const int BOUNCE_COUNT = 15;
 
+uniform uint rays_per_pixel;
+
 uniform vec3 spheres_pos[SPHERES_AMOUNT];
 uniform float spheres_size[SPHERES_AMOUNT];
 uniform vec3 spheres_color[SPHERES_AMOUNT];
@@ -274,15 +276,13 @@ void main()
 
     xorwow(state);
 
-    const uint RAYS_PER_PIXEL = 32u;
-
     vec3 color = vec3(0.0);
-    for(uint i = 0u; i < RAYS_PER_PIXEL; ++i)
+    for(uint i = 0u; i < rays_per_pixel; ++i)
     {
         color += pixel_at(pixel, state);
     }
 
-    vec3 current_color = color / float(RAYS_PER_PIXEL);
+    vec3 current_color = color / float(rays_per_pixel);
 
     float gamma = 2.2;
     vec3 mapped_color = pow(current_color / (current_color + vec3(1.0)), vec3(1.0 / gamma));
