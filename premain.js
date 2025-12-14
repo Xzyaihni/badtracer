@@ -415,14 +415,14 @@ function movement_directions()
 
 function handle_movement_inputs(dt)
 {
-    const directions = movement_directions(dt);
+    const directions = movement_directions();
 
     if (directions.length === 0)
     {
 	return;
     }
 
-    const speed = 0.02 * dt;
+    const speed = 0.625 * dt;
 
     directions.forEach((direction) => { camera_pos = array_add(camera_pos, array_mul(direction, speed)); });
 
@@ -437,7 +437,7 @@ function handle_inputs(dt)
 
 function draw_frame(current_time)
 {
-    const dt = Math.min(current_time - previous_frame_time, 0.5);
+    const dt = Math.min(current_time - previous_frame_time, (1000.0 / 30.0)) * 0.001;
     previous_frame_time = current_time;
 
     handle_inputs(dt);
