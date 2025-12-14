@@ -32,12 +32,12 @@
       #display_canvas
       {
         grid-column: 2;
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
       }
 
       #display_canvas
       {
+        width: 640px;
+        height: 640px;
         margin: 5px;
         border: 5px solid #ffc4d5;
         transform: scaleY(-1);
@@ -47,7 +47,7 @@
   <body>
     <p class="centered">w/a/s/d to move, click on picture to look around</p>
     <div class="centered" id="main_grid">
-      <canvas id="display_canvas" width="640" height="640">
+      <canvas id="display_canvas">
         sowy couldnt display canvas, something wrong ; -;
       </canvas>
     </div>

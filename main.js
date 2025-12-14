@@ -298,11 +298,11 @@ void main()
     frag_color = vec4(mapped_color, 1.0);
 }`;
 const SPHERES_AMOUNT = 10; //COPY TO JS
-const canvas = new OffscreenCanvas(640, 640);
-const gl = canvas.getContext("webgl2");
+let display_canvas = document.getElementById("display_canvas");
+let display_context = display_canvas.getContext("2d");
 
-const display_canvas = document.getElementById("display_canvas");
-const display_context = display_canvas.getContext("2d");
+let canvas = new OffscreenCanvas(display_canvas.width, display_canvas.height);
+let gl = canvas.getContext("webgl2");
 
 const frame_counter_element = document.getElementById("frame_counter");
 
@@ -373,6 +373,42 @@ document.addEventListener("DOMContentLoaded", main);
 document.addEventListener("keydown", on_key_down);
 document.addEventListener("keyup", on_key_up);
 document.addEventListener("mousemove", on_mouse_move)
+
+const resizer = new ResizeObserver(on_resize_observer);
+resizer.observe(display_canvas, {box: "content-box"});
+
+function on_resize_observer(events)
+{
+    for (const event of events)
+    {
+        if (!event.devicePixelContentBoxSize)
+        {
+            return;
+        }
+
+        const box = event.devicePixelContentBoxSize[0];
+
+        resize_canvas_correct(box.inlineSize, box.blockSize);
+    }
+}
+
+function resize_canvas_correct(new_width, new_height)
+{
+    if (canvas.width !== new_width || canvas.height !== new_height
+        || display_canvas.width !== new_width || display_canvas.height !== new_height)
+    {
+        canvas = new OffscreenCanvas(new_width, new_height);
+
+        gl = canvas.getContext("webgl2");
+
+        display_canvas.width = new_width;
+        display_canvas.height = new_height;
+
+        display_context = display_canvas.getContext("2d");
+
+        clear_rendered();
+    }
+}
 
 function main()
 {
