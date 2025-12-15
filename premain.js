@@ -107,7 +107,19 @@ function resize_canvas_correct(new_width, new_height)
         display_context = display_canvas.getContext("2d");
 
         clear_rendered();
+
+        canvas_dependent();
     }
+}
+
+function canvas_dependent()
+{
+    if (program_info === null)
+    {
+        return;
+    }
+
+    gl.uniform2f(program_info.uniform_locations.canvas_dimensions, canvas.width, canvas.height);
 }
 
 function main()
@@ -751,6 +763,8 @@ function initialize_scene()
         return;
     }
 
+    canvas_dependent();
+
     requestAnimationFrame(draw_frame);
 }
 
@@ -802,6 +816,7 @@ function attributes_info()
         program_info.uniform_locations[name] = gl.getUniformLocation(shader_program, name);
     };
 
+    add_uniform("canvas_dimensions");
     add_uniform("rays_per_pixel");
 
     add_uniform("spheres_pos");

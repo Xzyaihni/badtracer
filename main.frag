@@ -8,11 +8,11 @@ precision mediump float;
 
 out vec4 frag_color;
 
-const ivec2 CANVAS_DIMENSIONS = ivec2(640, 640);
-
 const int SPHERES_AMOUNT = 10; //COPY TO JS
 
 const int BOUNCE_COUNT = 15;
+
+uniform vec2 canvas_dimensions;
 
 uniform uint rays_per_pixel;
 
@@ -263,11 +263,11 @@ vec3 pixel_at(vec2 pixel, inout XorwowState state)
 
 void main()
 {
-    vec2 pixel = gl_FragCoord.xy / vec2(CANVAS_DIMENSIONS);
+    vec2 pixel = gl_FragCoord.xy / canvas_dimensions;
 
     uint a = uint(gl_FragCoord.x);
     uint b = uint(gl_FragCoord.y);
-    uint index = a + b * uint(CANVAS_DIMENSIONS.x);
+    uint index = a + b * uint(canvas_dimensions.x);
 
     XorwowState state;
     state.s = frame_seed;
