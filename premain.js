@@ -108,7 +108,7 @@ function resize_canvas_correct(new_width, new_height)
 
         clear_rendered();
 
-        canvas_dependent();
+        initialize_scene();
     }
 }
 
