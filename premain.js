@@ -746,9 +746,10 @@ function initialize_scene()
         return;
     }
 
+    gl.useProgram(program_info.program);
+
     const buffer = init_default_buffer(program_info);
 
-    gl.useProgram(program_info.program);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 
     //default but still
